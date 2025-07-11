@@ -1,0 +1,63 @@
+# 环境变量文件
+.env
+.env.local
+.env.production
+.env.development
+*.env
+
+# API密钥和配置文件
+config.js
+!config.example.js
+
+# 依赖目录
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 日志文件
+*.log
+logs/
+
+# 数据库和存储
+*.db
+*.sqlite
+*.sqlite3
+rag_storage/
+pdf_embedding_storage/
+models_cache/
+
+# 临时文件
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# IDE和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 输出目录
+outputs/
+generated_docs/
+generated_documents/
+parser_output/
+
+# 测试覆盖率
+coverage/
+.coverage
+.nyc_output
+
+# 包文件
+*.tgz
+*.tar.gz
+*.zip
+
+# 系统文件
+.DS_Store
+Thumbs.db 
