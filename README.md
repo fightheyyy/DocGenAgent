@@ -4,6 +4,71 @@
 
 ReactAgent是一个基于AI的智能文档生成系统，支持多种文档格式的自动生成，包括PDF解析、知识检索、模板填充和文档输出等核心功能。
 
+## 🚀 快速开始
+
+### 1. 环境要求
+
+**Python版本要求：**
+- **Python 3.12** （必需）
+- ⚠️ **重要：必须使用Python 3.12，不能使用Python 3.13**
+- 原因：camel-ai依赖限制最高支持Python 3.12
+
+**推荐使用conda环境：**
+```bash
+# 创建新的conda环境
+conda create -n gauz-agent-py312 python=3.12
+conda activate gauz-agent-py312
+```
+
+### 2. 安装依赖
+
+```bash
+# 安装所有依赖
+pip install -r requirements.txt
+```
+
+**主要依赖说明：**
+- `docling>=2.1.0` - 高级PDF解析
+- `camel-ai>=0.1.7` - AI模型集成
+- `chromadb>=0.4.18` - 向量数据库
+- `minio>=7.2.0` - 云存储
+- `colorama>=0.4.6` - 终端颜色支持
+
+### 3. 环境配置
+
+**创建环境变量文件：**
+```bash
+# 复制环境变量模板
+cp .env.example .env
+```
+
+**必需的API密钥：**
+```bash
+# 编辑 .env 文件
+DEEPSEEK_API_KEY=sk-your-deepseek-api-key-here
+OPENROUTER_API_KEY=sk-or-v1-your-openrouter-api-key-here
+```
+
+**API密钥获取方式：**
+- **DeepSeek API**: 访问 [DeepSeek 官网](https://platform.deepseek.com/) 获取
+- **OpenRouter API**: 访问 [OpenRouter 官网](https://openrouter.ai/) 获取
+
+### 4. 配置前端（可选）
+
+```bash
+cp frontend/config.example.js frontend/config.js
+```
+
+### 5. 启动系统
+
+```bash
+# 启动Web服务
+python scripts/web_app.py
+
+# 或使用Agent
+python scripts/run_agent.py --task "生成一份技术报告"
+```
+
 ## 核心功能
 
 ### 1. 文档生成工具 (Document Generator)
@@ -55,29 +120,6 @@ ReactAgent是一个基于AI的智能文档生成系统，支持多种文档格�
 - 完整的章节结构
 - 多种格式输出
 
-## 快速开始
-
-### 1. 安装依赖
-```bash
-pip install -r requirements.txt
-```
-
-### 2. 配置环境
-复制并配置前端配置文件：
-```bash
-cp frontend/config.example.js frontend/config.js
-```
-
-### 3. 启动Web服务
-```bash
-python scripts/web_app.py
-```
-
-### 4. 使用Agent
-```bash
-python scripts/run_agent.py --task "生成一份技术报告"
-```
-
 ## 系统架构
 
 ```
@@ -119,23 +161,74 @@ ReactAgent/
 
 ### 主要配置项
 - **AI模型**：支持DeepSeek等模型
-- **存储服务**：MinIO云存储
+- **存储服务**：MinIO云存储（已预配置）
 - **向量数据库**：ChromaDB
 - **图片检索**：集成RAG图片搜索
 
-### 环境变量
+### 环境变量详情
+
+**必需配置：**
 ```bash
-DEEPSEEK_API_KEY=your_api_key
-MINIO_ENDPOINT=your_minio_endpoint
-MINIO_ACCESS_KEY=your_access_key
-MINIO_SECRET_KEY=your_secret_key
+# AI模型配置
+DEEPSEEK_API_KEY=your_deepseek_api_key
+OPENROUTER_API_KEY=your_openrouter_api_key
+
+# 数据库配置
+CHROMA_DB_PATH=./rag_storage
 ```
+
+**MinIO存储配置：**
+> ⚠️ **注意**：MinIO配置已在代码中预设，无需额外配置环境变量
+> 
+> 预设配置：
+> - 端点：43.139.19.144:9000
+> - 用户名：minioadmin
+> - 密码：minioadmin
+> - 存储桶：images
+
+## 故障排除
+
+### 常见问题
+
+1. **安装依赖失败**
+   ```bash
+   # 尝试升级pip
+   pip install --upgrade pip
+   
+   # 分别安装问题依赖
+   pip install docling
+   pip install camel-ai
+   ```
+
+2. **ChromaDB错误**
+   ```bash
+   # 重新创建数据库
+   rm -rf rag_storage
+   mkdir rag_storage
+   ```
+
+3. **API密钥错误**
+   ```bash
+   # 检查.env文件
+   cat .env
+   
+   # 验证API密钥格式
+   echo $DEEPSEEK_API_KEY
+   echo $OPENROUTER_API_KEY
+   ```
 
 ## 许可证
 
 本项目采用MIT许可证，详见LICENSE文件。
 
 ## 更新日志
+
+### v1.3.0 (2025-01-15)
+- 🆕 支持Python 3.13
+- 🆕 添加完整的环境变量配置
+- 🆕 优化依赖管理
+- 🆕 增强安装文档
+- 🔧 优化MinIO配置说明
 
 ### v1.2.0 (2025-01-15)
 - 🆕 新增智能图片检索功能
@@ -155,4 +248,3 @@ MINIO_SECRET_KEY=your_secret_key
 - 🆕 基础RAG功能
 - 🆕 PDF解析功能
 - 🆕 Web界面支持
-# GauzDocument-Agent
