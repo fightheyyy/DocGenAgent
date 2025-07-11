@@ -26,6 +26,11 @@ from upload_cloud import upload_to_minio
 from process_image import get_image_info
 from converter import convert_md_to_docx_with_images
 
+# --- 导入prompt加载器 ---
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from prompts.loader import get_prompt_loader
+
 
 # TaskState 类的代码保持不变
 class TaskState:
@@ -165,7 +170,18 @@ class LongDocumentGenerator:
             knowledge_str = "\n\n---\n\n".join(knowledge_pieces)
             knowledge_context = f"\n请参考以下背景资料进行撰写：\n{knowledge_str}\n"
 
-        prompt = f"""你是一位专业的报告撰写人。请根据以下项目简介和背景资料，撰写一篇结构完整、内容流畅的通用短文或报告，总字数控制在2000字以内。
+        try:
+            # 使用prompt模板
+            prompt_loader = get_prompt_loader()
+            prompt_template = prompt_loader.get_prompt("document_generation", "short_report_generation_prompt")
+            prompt = prompt_template.format(
+                creative_brief=creative_brief,
+                knowledge_context=knowledge_context
+            )
+        except Exception as e:
+            # 如果加载失败，使用备用prompt
+            print(f"警告：加载prompt模板失败，使用备用prompt: {e}")
+            prompt = f"""你是一位专业的报告撰写人。请根据以下项目简介和背景资料，撰写一篇结构完整、内容流畅的通用短文或报告，总字数控制在2000字以内。
 文章应有逻辑地分为几个部分，并使用Markdown的二级标题（##）来标记每个部分的标题。
 
 【项目简介】
@@ -187,7 +203,16 @@ class LongDocumentGenerator:
         request = self.state.data['initialRequest']['request']
 
         # 注释：这里的Prompt也调整为文物评估的视角。
-        prompt_brief = f"""你是一位资深的文物影响评估专家。请根据下面的对话记录和最终请求，为即将撰写的《文物影响评估报告》提炼一份核心的“创作指令”（Creative Brief）。
+        try:
+            prompt_loader = get_prompt_loader()
+            prompt_template = prompt_loader.get_prompt("document_generation", "creative_brief_analysis_prompt")
+            prompt_brief = prompt_template.format(
+                chathistory=chathistory,
+                request=request
+            )
+        except Exception as e:
+            print(f"警告：加载prompt模板失败，使用备用prompt: {e}")
+            prompt_brief = f"""你是一位资深的文物影响评估专家。请根据下面的对话记录和最终请求，为即将撰写的《文物影响评估报告》提炼一份核心的"创作指令"（Creative Brief）。
 这份指令需要明确评估对象、项目性质和核心的评估要求。
 【对话记录】
 {chathistory}
@@ -203,7 +228,13 @@ class LongDocumentGenerator:
         self.state.data['creativeBrief'] = brief
 
         self.state.update_status("brief_generation", "正在提炼项目主题以优化检索...", 7)
-        prompt_project_name = f"""从以下创作指令中，提取一个简短的核心项目名称或主题（例如，“xx路社文体中心建设项目”或“医灵古庙修缮工程”），用于优化后续的知识库检索。
+        try:
+            prompt_loader = get_prompt_loader()
+            prompt_template = prompt_loader.get_prompt("document_generation", "project_name_extraction_prompt")
+            prompt_project_name = prompt_template.format(brief=brief)
+        except Exception as e:
+            print(f"警告：加载prompt模板失败，使用备用prompt: {e}")
+            prompt_project_name = f"""从以下创作指令中，提取一个简短的核心项目名称或主题（例如，"xx路社文体中心建设项目"或"医灵古庙修缮工程"），用于优化后续的知识库检索。
 请以JSON格式返回，只包含一个 'project_name' 字段。
 重要提示：项目名称必须使用中文。
 创作指令：{brief}
