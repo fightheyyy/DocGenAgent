@@ -5,6 +5,20 @@
 .env.development
 *.env
 
+# 本地分析和文档文件
+项目代码分析报告.md
+项目代码分析报告.html
+项目代码分析报告.pdf
+代码分析报告.md
+代码分析报告.html
+代码分析报告.pdf
+本地说明文档.md
+本地文档.md
+项目分析.md
+src代码架构分析与优化建议.md
+API客户端设计分析与重构建议.md
+渐进式重构执行计划.md
+
 # API密钥和配置文件
 config.js
 !config.example.js

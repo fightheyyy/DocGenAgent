@@ -1,0 +1,39 @@
+# Cursor Rules for GauzDocument-Agent Project
+
+## Environment Setup
+- Always use the `gauz-agent-py312` conda environment for this project
+- Python version: 3.12.11 (Required for camel-ai compatibility)
+- Environment path: `/Users/zhuhanyuan/anaconda3/envs/gauz-agent-py312`
+
+## Terminal Commands
+When running terminal commands in this project:
+1. Ensure the conda environment `gauz-agent-py312` is activated
+2. If not activated, run: `conda activate gauz-agent-py312`
+3. All Python commands should use the environment's Python interpreter
+
+## Code Execution Rules
+- Use Python 3.12.11 from the gauz-agent-py312 environment
+- Install packages using: `pip install <package>` (within the activated environment)
+- For conda packages use: `conda install -n gauz-agent-py312 <package>`
+
+## Important Version Notes
+- Python 3.12.x is REQUIRED (not 3.13) due to camel-ai dependency limitations
+- All dependencies in requirements.txt are verified for Python 3.12 compatibility
+
+## Project Structure
+This is a Python-based AI agent system with the following key components:
+- `src/` - Main source code directory
+- `frontend/` - Web interface
+- `Paper2Poster/` - PDF processing dependencies
+- `tasks/` - Generated task files
+
+## Development Workflow
+1. Always activate conda environment first
+2. Run tests before making changes
+3. Use the provided test script: `python 快速修复导入问题测试.py`
+4. Follow the渐进式重构执行计划.md for refactoring guidelines
+
+## Dependencies Management
+- Use `requirements.txt` for Python packages
+- Keep environment isolated from base conda environment
+- Document new dependencies as they are added 
