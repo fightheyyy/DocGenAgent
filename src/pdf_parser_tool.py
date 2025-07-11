@@ -142,6 +142,13 @@ except ImportError as e:
     OPENROUTER_CLIENT_AVAILABLE = False
     print(f"⚠️ OpenRouter Client不可用: {e}")
 
+# 导入prompt加载器
+try:
+    from src.prompts.loader import get_prompt_loader
+    PROMPT_LOADER_AVAILABLE = True
+except ImportError:
+    PROMPT_LOADER_AVAILABLE = False
+
 
 # 加载环境变量
 if DEPENDENCIES_AVAILABLE:
@@ -370,8 +377,14 @@ class OpenRouterParserAgent:
     
     def _reorganize_content_with_llm(self, text_content: str) -> Dict:
         """使用LLM重新组织内容"""
-        # 提示模板
-        template_content = """You are a document content divider and extractor specialist, expert in dividing and extracting content from various types of documents and reorganizing it into a two-level json format.
+        # 使用prompt模板
+        try:
+            if PROMPT_LOADER_AVAILABLE:
+                prompt_loader = get_prompt_loader()
+                template_content = prompt_loader.get_prompt("pdf_processing", "content_reorganization_template")
+            else:
+                # 备用模板
+                template_content = """You are a document content divider and extractor specialist, expert in dividing and extracting content from various types of documents and reorganizing it into a two-level json format.
 
 Based on given markdown document, generate a JSON output, make sure the output is concise and focused.
 
@@ -395,31 +408,84 @@ Step-by-Step Instructions:
 9. There **must** be a section for the document title.
 
 Example Output:
-{
-    "meta": {
+{{
+    "meta": {{
         "poster_title": "raw title of the document",
         "authors": "authors of the document",
         "affiliations": "affiliations of the authors"
-    },
+    }},
     "sections": [
-        {
+        {{
             "title": "Document Title",
             "content": "content of document title and author"
-        },
-        {
+        }},
+        {{
             "title": "Introduction",
             "content": "content of introduction section"
-        },
-        {
+        }},
+        {{
             "title": "Methods",
             "content": "content of methods section"
-        }
+        }}
     ]
-}
+}}
 
 Give your output in JSON format
 Input:
-{{ markdown_document }}
+{markdown_document}
+Output:"""
+        except Exception as e:
+            print(f"警告：加载内容重组prompt模板失败，使用备用模板: {e}")
+            # 备用模板
+            template_content = """You are a document content divider and extractor specialist, expert in dividing and extracting content from various types of documents and reorganizing it into a two-level json format.
+
+Based on given markdown document, generate a JSON output, make sure the output is concise and focused.
+
+Step-by-Step Instructions:
+1. Identify Sections and Subsections in document and identify sections and subsections based on the heading levels and logical structure.
+
+2. Divide Content: Reorganize the content into sections and subsections, ensuring that each subsection contains approximately 500 words.
+
+3. Refine Titles: Create titles for each section with at most 3 words.
+
+4. Remove Unwanted Elements: Eliminate any unwanted elements such as headers, footers, text surrounded by `~~` indicating deletion.
+
+5. Refine Text: For content, you should keep as much raw text as possible. Do not include citations.
+
+6. Length: you should control the length of each section, according to their importance according to your understanding of the document. For important sections, their content should be long.
+
+7. Make sure there is a document title section at the beginning, and it should contain information like document title, author, organization etc.
+
+8. The "meta" key contains the meta information of the document, where the title should be the raw title of the document and is not summarized.
+
+9. There **must** be a section for the document title.
+
+Example Output:
+{{
+    "meta": {{
+        "poster_title": "raw title of the document",
+        "authors": "authors of the document",
+        "affiliations": "affiliations of the authors"
+    }},
+    "sections": [
+        {{
+            "title": "Document Title",
+            "content": "content of document title and author"
+        }},
+        {{
+            "title": "Introduction",
+            "content": "content of introduction section"
+        }},
+        {{
+            "title": "Methods",
+            "content": "content of methods section"
+        }}
+    ]
+}}
+
+Give your output in JSON format
+Input:
+{markdown_document}
 Output:"""
         
         from jinja2 import Template

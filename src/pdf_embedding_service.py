@@ -44,6 +44,13 @@ except ImportError:
     MINIO_AVAILABLE = False
     print("⚠️ MinIO客户端不可用，图片上传功能受限")
 
+# 导入prompt加载器
+try:
+    from src.prompts.loader import get_prompt_loader
+    PROMPT_LOADER_AVAILABLE = True
+except ImportError:
+    PROMPT_LOADER_AVAILABLE = False
+
 class PDFEmbeddingService:
     """PDF内容向量化服务 - 统一存储文本和图片"""
     
@@ -784,7 +791,25 @@ class PDFEmbeddingService:
                 print(f"📊 对表格 {table_id} 进行VLM深度分析...")
                 
                 # 构建专门针对表格的VLM提示词
-                prompt = """请作为专业的表格分析师，详细分析和描述这个表格的内容。请按以下结构回答：
+                try:
+                    # 使用prompt模板
+                    if PROMPT_LOADER_AVAILABLE:
+                        prompt_loader = get_prompt_loader()
+                        prompt = prompt_loader.get_prompt("pdf_processing", "table_analysis_prompt")
+                    else:
+                        prompt = """请作为专业的表格分析师，详细分析和描述这个表格的内容。请按以下结构回答：
+
+1. 表格类型：确定这是数据表、对比表、统计表、时间表还是其他类型的表格
+2. 表格结构：描述表格的行数、列数、表头和整体结构
+3. 核心数据：详细列出表格中的关键数据、数值和信息
+4. 文本内容：完整转录表格中的所有文字、数字、标题、单位等
+5. 数据关系：分析表格数据之间的关系、趋势和模式
+6. 关键信息：提炼表格要表达的核心信息和结论
+
+请用中文回答，尽可能详细和准确地转录表格内容。"""
+                except Exception as e:
+                    print(f"警告：加载表格分析prompt模板失败，使用备用prompt: {e}")
+                    prompt = """请作为专业的表格分析师，详细分析和描述这个表格的内容。请按以下结构回答：
 
 1. 表格类型：确定这是数据表、对比表、统计表、时间表还是其他类型的表格
 2. 表格结构：描述表格的行数、列数、表头和整体结构
@@ -837,6 +862,17 @@ class PDFEmbeddingService:
                 print(f"🔍 对图片 {image_id} 进行VLM深度分析...")
                 
                 # 构建针对Gemini 2.5 Flash优化的VLM提示词
+                try:
+                    # 使用prompt模板
+                    if PROMPT_LOADER_AVAILABLE:
+                        prompt_loader = get_prompt_loader()
+                        prompt = prompt_loader.get_prompt("pdf_processing", "image_analysis_prompt")
+                    else:
+                        # 使用备用prompt
+                        raise Exception("PromptLoader不可用")
+                except Exception as e:
+                    print(f"警告：加载图片分析prompt模板失败，使用备用prompt: {e}")
+                    # 使用备用prompt
                 prompt = """# 角色
 你是一个精炼的图像分析引擎。
 

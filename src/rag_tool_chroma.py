@@ -34,6 +34,13 @@ except ImportError:
     
     PDF_EMBEDDING_SERVICE_AVAILABLE = False
 
+# 导入prompt加载器
+try:
+    from src.prompts.loader import get_prompt_loader
+    PROMPT_LOADER_AVAILABLE = True
+except ImportError:
+    PROMPT_LOADER_AVAILABLE = False
+
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -316,7 +323,40 @@ class TemplateFieldProcessor:
         """使用AI生成字段内容"""
         content_text = "\n".join(relevant_content)
         
-        prompt = f"""
+        try:
+            # 使用prompt模板
+            if PROMPT_LOADER_AVAILABLE:
+                prompt_loader = get_prompt_loader()
+                prompt_template = prompt_loader.get_prompt("rag", "field_content_generation_prompt")
+                prompt = prompt_template.format(
+                    field_name=field_name,
+                    field_requirement=field_requirement,
+                    content_text=content_text
+                )
+            else:
+                # 备用prompt
+                prompt = f"""
+你是一个专业的文档处理助手。请根据以下信息为字段生成合适的内容：
+
+字段名称：{field_name}
+字段要求：{field_requirement}
+
+相关资料内容：
+{content_text}
+
+任务要求：
+1. 基于相关资料内容，为该字段生成专业、准确的内容
+2. 内容应该符合字段要求和描述
+3. 保持内容的专业性和完整性
+4. 如果资料内容不足，请基于字段要求进行合理补充
+5. 内容长度适中，重点突出
+
+请直接返回该字段的具体内容，不要包含解释文字。
+"""
+        except Exception as e:
+            logger.warning(f"加载prompt模板失败，使用备用prompt: {e}")
+            # 备用prompt
+            prompt = f"""
 你是一个专业的文档处理助手。请根据以下信息为字段生成合适的内容：
 
 字段名称：{field_name}
@@ -574,7 +614,17 @@ class RAGTool(Tool):
             logger.info(f"🚀 开始处理上传的图片: {image_path}")
             
             # 1. 使用Gemini生成图片描述
-            prompt = "请详细描述这张图片的内容，包括场景、物体、人物、风格和任何可见的文本。"
+            try:
+                # 使用prompt模板
+                if PROMPT_LOADER_AVAILABLE:
+                    prompt_loader = get_prompt_loader()
+                    prompt = prompt_loader.get_prompt("rag", "image_description_prompt")
+                else:
+                    prompt = "请详细描述这张图片的内容，包括场景、物体、人物、风格和任何可见的文本。"
+            except Exception as e:
+                logger.warning(f"加载prompt模板失败，使用备用prompt: {e}")
+                prompt = "请详细描述这张图片的内容，包括场景、物体、人物、风格和任何可见的文本。"
+            
             ai_description = openrouter_client.get_image_description_gemini(image_path, prompt=prompt)
             
             if "Error:" in ai_description:
