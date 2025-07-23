@@ -9,7 +9,7 @@ from typing import Dict, Any
 SYSTEM_CONFIG = {
     # OpenRouter配置
     'openrouter': {
-        'api_key': 'YOUR_OPEN_ROUTER_KEY',
+        'api_key': 'YOUR',
         'base_url': 'https://openrouter.ai/api/v1',
         'model': 'google/gemini-2.5-flash',
         'max_tokens': 10000,
