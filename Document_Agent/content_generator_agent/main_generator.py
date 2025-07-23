@@ -70,7 +70,7 @@ class MainDocumentGenerator:
         """获取当前速率限制延迟"""
         return self.rate_limit_delay
 
-    def generate_document(self, json_file_path: str = "第二agent的输出.json") -> str:
+    def generate_document(self, json_file_path: str = "第二agent的输出_刘氏宗祠_rag.json") -> str:
         """
         生成文档
         

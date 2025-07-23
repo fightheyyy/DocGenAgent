@@ -11,7 +11,7 @@ class SimpleRAGClient:
     """简化的RAG客户端实现"""
     
     def __init__(self):
-        self.base_url = "http://47939797.r12.cpolar.top/react_agent"
+        self.base_url = "http://192.168.1.15:8000/rag_agent"
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         self.timeout = 30
     
@@ -19,7 +19,7 @@ class SimpleRAGClient:
         """检索相关信息"""
         try:
             # 使用search接口
-            payload = {"query": query}
+            payload = {"question": query}
             
             response = requests.post(self.base_url, json=payload, timeout=self.timeout, 
                                   headers={'Content-Type': 'application/json'})
@@ -52,7 +52,7 @@ class SimpleRAGClient:
         与 retrieve 相同，但不限制返回结果数量，保持与原 RAGRetriever 的兼容性
         """
         try:
-            payload = {"query": query}
+            payload = {"question": query}
             response = requests.post(self.base_url, json=payload, timeout=self.timeout, 
                                   headers={'Content-Type': 'application/json'})
             response.raise_for_status()

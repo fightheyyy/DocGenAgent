@@ -1,5 +1,5 @@
 """
-OpenRouter客户端 - 连接DeepSeek模型
+OpenRouter客户端 - 连接模型
 """
 
 import requests
@@ -112,7 +112,7 @@ class OpenRouterClient:
                 response = self.session.post(
                     f"{self.config['base_url']}/chat/completions",
                     json=data,
-                    timeout=(10, self.config['timeout']),  # (连接超时, 读取超时)
+                    timeout=(30, self.config['timeout']),  # (连接超时, 读取超时)
                     verify=True,  # 验证SSL证书
                     stream=False
                 )
