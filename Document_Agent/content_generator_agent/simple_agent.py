@@ -25,42 +25,54 @@ class SimpleContentGeneratorAgent:
         self.quality_threshold = 0.7
         self.max_improvement_attempts = 2
         
-    def generate_content_from_json(self, subtitle: str, how_to_write: str, retrieved_data: str) -> Dict[str, Any]:
+    def generate_content_from_json(self, subtitle: str, how_to_write: str, 
+                                   retrieved_text: List[Dict], retrieved_image: List[Dict], 
+                                   retrieved_table: List[Dict]) -> Dict[str, Any]:
         """
-        根据JSON字段生成内容 (V3 - 优化版：基于反馈的迭代生成)
+        根据JSON字段生成内容 (V4 - 支持分离的文本、图片、表格数据)
         
-        新流程：评估函数返回具体反馈，生成函数根据反馈迭代改进
+        新流程：主要基于retrieved_text生成内容，然后在章节后面插入表格和图片
+        
+        Args:
+            subtitle: 章节标题
+            how_to_write: 写作指导
+            retrieved_text: 文本检索结果列表
+            retrieved_image: 图片检索结果列表  
+            retrieved_table: 表格检索结果列表
         """
         
         self.logger.info(f"开始生成内容: {subtitle}")
         start_time = time.time()
         
         try:
-            # 1. 生成初始内容（无反馈）
+            # 1. 处理文本数据，用于内容生成
+            text_content = self._extract_text_content(retrieved_text)
+            
+            # 2. 生成初始内容（基于文本数据）
             content = self._generate_content_from_json_section(
                 subtitle=subtitle,
                 how_to_write=how_to_write,
-                retrieved_data=retrieved_data,
+                retrieved_text_content=text_content,
                 feedback=None
             )
             
             final_score, final_feedback = 0.0, ""
             
-            # 2. 质量控制与改进循环
+            # 3. 质量控制与改进循环
             for attempt in range(self.max_improvement_attempts + 1):
-                # 2.1. 评估当前内容质量并获取具体反馈
+                # 3.1. 评估当前内容质量并获取具体反馈
                 current_score, feedback = self._evaluate_content_quality(
-                    content, how_to_write, retrieved_data
+                    content, how_to_write, text_content
                 )
                 
                 final_score, final_feedback = current_score, feedback
                 
-                # 2.2. 检查是否达到质量标准（70分）
+                # 3.2. 检查是否达到质量标准（70分）
                 if current_score >= self.quality_threshold:
                     self.logger.info(f"内容质量达标 (分数: {current_score:.2f})，无需改进。")
                     break # 质量达标，跳出循环
                 
-                # 2.3. 如果未达标且还有改进机会，则根据反馈重新生成
+                # 3.3. 如果未达标且还有改进机会，则根据反馈重新生成
                 if attempt < self.max_improvement_attempts:
                     self.logger.warning(
                         f"第 {attempt + 1} 次尝试质量不达标 (分数: {current_score:.2f})，"
@@ -70,7 +82,7 @@ class SimpleContentGeneratorAgent:
                     content = self._generate_content_from_json_section(
                         subtitle=subtitle,
                         how_to_write=how_to_write,
-                        retrieved_data=retrieved_data,
+                        retrieved_text_content=text_content,
                         feedback=feedback
                     )
                 else:
@@ -79,8 +91,11 @@ class SimpleContentGeneratorAgent:
                         f"质量仍不达标 (最终分数: {current_score:.2f})。"
                     )
 
-            # 3. 清理最终内容
+            # 4. 清理最终内容
             content = self._clean_content(content, subtitle)
+            
+            # 5. 在内容后面插入表格和图片
+            content = self._append_tables_and_images(content, retrieved_table, retrieved_image)
             
             generation_time = time.time() - start_time
             
@@ -109,15 +124,15 @@ class SimpleContentGeneratorAgent:
             }
     
     def _generate_content_from_json_section(self, subtitle: str, 
-                                              how_to_write: str, retrieved_data: str, 
+                                              how_to_write: str, retrieved_text_content: str, 
                                               feedback: Optional[str] = None) -> str:
         """
-        根据JSON信息生成内容 (V3 - 支持反馈驱动的改进生成)
+        根据JSON信息生成内容 (V4 - 基于文本内容生成)
         
         Args:
             subtitle: 章节标题
             how_to_write: 写作指导
-            retrieved_data: 检索数据
+            retrieved_text_content: 处理后的文本内容
             feedback: 评估反馈（如果是重新生成）
         """
         
@@ -131,7 +146,7 @@ class SimpleContentGeneratorAgent:
 {how_to_write}
 
 【核心参考资料】：
-{retrieved_data}
+{retrieved_text_content}
 
 【改进反馈】：
 {feedback or "无特殊要求，按照标准流程撰写"}
@@ -176,9 +191,9 @@ class SimpleContentGeneratorAgent:
             return f"[内容生成失败: {str(e)}]"
     
     def _evaluate_content_quality(self, content: str, how_to_write: str, 
-                                    retrieved_data: str) -> Tuple[float, str]:
+                                    retrieved_text_content: str) -> Tuple[float, str]:
         """
-        评估内容质量并返回具体反馈 (V3 - 返回具体可操作的反馈)
+        评估内容质量并返回具体反馈 (V4 - 基于文本内容评估)
         
         Returns:
             Tuple[float, str]: (评分0-1, 具体反馈信息)
@@ -208,7 +223,7 @@ class SimpleContentGeneratorAgent:
 {how_to_write}
 
 【核心参考资料】：
-{retrieved_data}
+{retrieved_text_content}
 
 【待评估内容】：
 {content}
@@ -277,3 +292,58 @@ class SimpleContentGeneratorAgent:
         content = re.sub(r'[ \t]+\n', '\n', content)      # 移除行尾空格
         
         return content.strip()
+    
+    def _extract_text_content(self, retrieved_text: List[Dict]) -> str:
+        """
+        从retrieved_text列表中提取文本内容
+        
+        Args:
+            retrieved_text: 文本检索结果列表
+            
+        Returns:
+            str: 合并后的文本内容
+        """
+        if not retrieved_text:
+            return "未检索到相关文本资料。"
+        
+        text_parts = []
+        for i, text_item in enumerate(retrieved_text, 1):
+            content = text_item.get('content', str(text_item))
+            source = text_item.get('source', '未知来源')
+            text_parts.append(f"[资料{i}] 来源: {source}\n内容: {content}")
+        
+        return "\n\n".join(text_parts)
+    
+    def _append_tables_and_images(self, content: str, retrieved_table: List[Dict], 
+                                retrieved_image: List[Dict]) -> str:
+        """
+        在生成的章节内容后面插入表格和图片
+        
+        Args:
+            content: 生成的章节内容
+            retrieved_table: 表格检索结果列表
+            retrieved_image: 图片检索结果列表
+            
+        Returns:
+            str: 包含表格和图片的完整内容
+        """
+        final_content = content
+        
+        # 添加表格
+        if retrieved_table:
+            final_content += "\n\n" + "=" * 50 + "\n相关表格资料\n" + "=" * 50
+            for i, table_item in enumerate(retrieved_table, 1):
+                table_content = table_item.get('content', str(table_item))
+                table_source = table_item.get('source', '未知来源')
+                final_content += f"\n\n【表格{i}】来源: {table_source}\n{table_content}"
+        
+        # 添加图片
+        if retrieved_image:
+            final_content += "\n\n" + "=" * 50 + "\n相关图片资料\n" + "=" * 50
+            for i, image_item in enumerate(retrieved_image, 1):
+                image_desc = image_item.get('content', image_item.get('description', '无描述'))
+                image_path = image_item.get('path', '无路径')
+                image_source = image_item.get('source', '未知来源')
+                final_content += f"\n\n【图片{i}】来源: {image_source}\n描述: {image_desc}\n路径: {image_path}"
+        
+        return final_content

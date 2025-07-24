@@ -17,7 +17,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
 sys.path.insert(0, project_root)
 
-from clients.simple_rag_client import SimpleRAGClient
+# SimpleRAGClient已移除，OrchestratorAgent现在使用外部API
 from clients.openrouter_client import OpenRouterClient
 from agents.orchestrator_agent.agent import OrchestratorAgent
 from config.settings import setup_logging
@@ -31,9 +31,9 @@ def create_orchestrator():
     setup_logging()
     
     try:
-        rag_client = SimpleRAGClient()
+        # rag_client = SimpleRAGClient()  # 已移除，使用外部API
         llm_client = OpenRouterClient()
-        orchestrator = OrchestratorAgent(rag_client, llm_client)
+        orchestrator = OrchestratorAgent(llm_client)  # 不再需要rag_client参数
         
         print("✅ 系统初始化成功！")
         return orchestrator

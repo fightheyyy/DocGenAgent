@@ -1,18 +1,41 @@
 """
-多Agent文档生成系统
+Gauz Document Agent - 智能速率控制增强版
 
-包含三个专门的Agent：
-1. OrchestratorAgent - 编排代理
-2. SectionWriterAgent - 章节写作代理  
-3. ContentGeneratorAgent - 内容生成代理
+主要组件：
+- 编排代理（OrchestratorAgent）
+- 章节写作代理（ReAct Agent）  
+- 内容生成代理（Content Generator Agent）
+- 通用数据结构（Common）
+
+版本：v2.0 - 智能速率控制增强版
 """
 
-from .orchestrator_agent.agent import OrchestratorAgent
-from .section_writer_agent.react_agent import ReactAgent
-from .content_generator_agent.main_generator import MainDocumentGenerator
+# 导入增强版本的Agent类
+from .orchestrator_agent.agent import EnhancedOrchestratorAgent
+from .section_writer_agent.react_agent import EnhancedReactAgent
+from .content_generator_agent.main_generator import EnhancedMainDocumentGenerator
+from .common.performance_monitor import DocumentAgentPerformanceMonitor
+from .common.advanced_rate_limiter import DocumentAgentRateLimiter
 
+# 向后兼容性别名（确保现有代码不会中断）
+OrchestratorAgent = EnhancedOrchestratorAgent
+ReactAgent = EnhancedReactAgent  
+MainDocumentGenerator = EnhancedMainDocumentGenerator
+
+# 导出所有主要类
 __all__ = [
+    # 增强版本（推荐使用）
+    'EnhancedOrchestratorAgent',
+    'EnhancedReactAgent', 
+    'EnhancedMainDocumentGenerator',
+    'DocumentAgentPerformanceMonitor',
+    'DocumentAgentRateLimiter',
+    
+    # 兼容性别名（保持现有代码工作）
     'OrchestratorAgent',
-    'ReactAgent', 
+    'ReactAgent',
     'MainDocumentGenerator'
-] 
+]
+
+__version__ = "2.0.0-smart-rate-control"
+__author__ = "Document Agent Team" 

@@ -1,8 +1,8 @@
 """
-ReAct Agent - 实现完整的Reasoning-Acting-Observing循环
+ReAct Agent - 智能速率控制增强版
 
 此版本将并行处理逻辑封装在Agent内部，调用方只需调用一个方法即可处理整个报告。
-支持统一的并发管理。
+集成智能速率控制系统，实现更高效的检索和处理。
 """
 
 import json
@@ -11,14 +11,16 @@ import re
 import requests
 import sys
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional, Tuple
 import concurrent.futures
 
-# 添加项目路径以导入 SimpleRAGClient 和 ConcurrencyManager
+# 添加项目路径以导入相关模块
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from clients.simple_rag_client import SimpleRAGClient
-from config.settings import get_concurrency_manager, ConcurrencyManager
+# 移除SimpleRAGClient导入
+from clients.external_api_client import get_external_api_client
+from config.settings import get_concurrency_manager, SmartConcurrencyManager
 
 # ==============================================================================
 # 1. 数据结构与辅助类
@@ -65,17 +67,35 @@ class ColoredLogger:
 # 2. 核心Agent类
 # ==============================================================================
 
-class ReactAgent:
-    def __init__(self, client: Any, concurrency_manager: ConcurrencyManager = None):
+class EnhancedReactAgent:
+    def __init__(self, client: Any, concurrency_manager: SmartConcurrencyManager = None):
         self.client = client
         self.colored_logger = ColoredLogger(__name__)
         self.max_iterations = 3
         self.quality_threshold = 0.7
-        self.rag_retriever = SimpleRAGClient()
         
-        # 并发管理器
+        # 移除备用RAG检索器，完全使用外部API
+        
+        # 外部API客户端
+        self.external_api = get_external_api_client()
+        
+        # 智能并发管理器
         self.concurrency_manager = concurrency_manager or get_concurrency_manager()
         self.max_workers = self.concurrency_manager.get_max_workers('react_agent')
+        
+        # 智能速率控制器
+        self.rate_limiter = self.concurrency_manager.get_rate_limiter('react_agent')
+        self.has_smart_control = self.concurrency_manager.has_smart_rate_control('react_agent')
+        
+        # 性能统计
+        self.react_stats = {
+            'total_sections_processed': 0,
+            'total_external_queries': 0,
+            'successful_queries': 0,
+            'failed_queries': 0,
+            'total_processing_time': 0.0,
+            'avg_quality_score': 0.0
+        }
         
         self.query_strategies = {
             'direct': "直接使用核心关键词搜索", 
@@ -85,7 +105,18 @@ class ReactAgent:
             'alternative': "使用同义词和相关概念进行发散搜索"
         }
         
-        self.colored_logger.info(f"ReactAgent 初始化完成，并发线程数: {self.max_workers}")
+        status_msg = f"智能速率控制: {'已启用' if self.has_smart_control else '传统模式'}"
+        self.colored_logger.info(f"EnhancedReactAgent 初始化完成，并发线程数: {self.max_workers}, {status_msg}")
+        
+        # 检查外部API服务状态
+        try:
+            api_status = self.external_api.check_service_status()
+            if api_status.get('status') == 'running':
+                self.colored_logger.info(f"✅ 外部API服务连接正常: {api_status.get('service', '')} v{api_status.get('version', '')}")
+            else:
+                self.colored_logger.warning(f"⚠️ 外部API服务状态异常: {api_status}，将使用本地RAG作为备用")
+        except Exception as e:
+            self.colored_logger.error(f"❌ 外部API服务连接检查失败: {e}，将使用本地RAG作为备用")
 
     def set_max_workers(self, max_workers: int):
         """动态设置最大线程数"""
@@ -116,7 +147,17 @@ class ReactAgent:
             for future in concurrent.futures.as_completed(future_to_section):
                 section = future_to_section[future]
                 try:
-                    section['retrieved_data'] = future.result()
+                    # 获取处理结果
+                    result = future.result()
+                    
+                    # 检查结果类型，如果是字典则分别存储三个字段，否则存储为retrieved_data
+                    if isinstance(result, dict) and all(key in result for key in ['retrieved_text', 'retrieved_image', 'retrieved_table']):
+                        section['retrieved_text'] = result['retrieved_text']
+                        section['retrieved_image'] = result['retrieved_image'] 
+                        section['retrieved_table'] = result['retrieved_table']
+                    else:
+                        # 向后兼容：如果返回字符串，则存储为retrieved_data
+                        section['retrieved_data'] = result
                 except Exception as exc:
                     error_message = f"章节 '{section.get('subtitle')}' 在并行处理中发生错误: {exc}"
                     self.colored_logger.error(error_message)
@@ -152,7 +193,7 @@ class ReactAgent:
             reasoning, query, strategy = (action_plan.get('analysis'), action_plan.get('keywords'), action_plan.get('strategy'))
             state.attempted_queries.append(f"{strategy}:{query}")
             self.colored_logger.thought(reasoning)
-            self.colored_logger.input_tool(f"SimpleRAGClient | Strategy: {strategy} | Query: {query}")
+            self.colored_logger.input_tool(f"外部API搜索 | Strategy: {strategy} | Query: {query}")
             
             results, quality_score = self._observe_section_results(query, section_context)
             state.retrieved_results.extend(results)
@@ -161,7 +202,7 @@ class ReactAgent:
             
             if not self._reflect(state, quality_score): break
                 
-        return self._synthesize_retrieved_content(section_context, state)
+        return self._synthesize_retrieved_results(section_context, state)
 
     def _reason_and_act_for_section(self, section_context: Dict[str, str], state: ReActState) -> Optional[Dict[str, str]]:
         """合并推理和行动阶段"""
@@ -193,16 +234,127 @@ class ReactAgent:
             return None
 
     def _observe_section_results(self, query: str, section_context: Dict[str, str]) -> Tuple[List[Dict], float]:
-        """观察阶段"""
+        """观察阶段（使用外部API进行文档搜索）"""
+        query_start_time = time.time()
+        
         try:
+            # 智能速率控制
+            if self.has_smart_control:
+                delay = self.rate_limiter.get_delay()
+                if delay > 0:
+                    time.sleep(delay)
+            
+            # 使用外部API进行文档搜索
+            all_results = []
+            
+            # 记录外部API查询开始
+            self.react_stats['total_external_queries'] += 1
+            
+            # 执行外部API文档搜索
+            api_start_time = time.time()
             keywords = [k.strip() for k in query.replace('，', ',').split(',') if k.strip()]
             combined_query = " ".join(keywords[:3])
-            all_results = self.rag_retriever.execute(combined_query) if combined_query else []
+            
+            search_results = self.external_api.document_search(
+                query_text=combined_query,
+                project_name="医灵古庙",
+                top_k=5,
+                content_type="all"
+            )
+            api_response_time = time.time() - api_start_time
+            
+            if search_results:
+                # 直接使用外部API返回的三个字段
+                all_results = []
+                
+                # 处理文本结果
+                for text_item in search_results.get('retrieved_text', []):
+                    all_results.append({
+                        'content': text_item.get('content', str(text_item)),
+                        'source': text_item.get('source', '外部API'),
+                        'type': 'text',
+                        'score': text_item.get('score', 1.0)
+                    })
+                
+                # 处理图片结果
+                for image_item in search_results.get('retrieved_image', []):
+                    all_results.append({
+                        'content': image_item.get('description', f"图片: {image_item.get('path', 'unknown')}"),
+                        'source': image_item.get('source', '外部API'),
+                        'type': 'image',
+                        'path': image_item.get('path', ''),
+                        'score': image_item.get('score', 1.0)
+                    })
+                
+                # 处理表格结果
+                for table_item in search_results.get('retrieved_table', []):
+                    all_results.append({
+                        'content': table_item.get('content', str(table_item)),
+                        'source': table_item.get('source', '外部API'),
+                        'type': 'table',
+                        'score': table_item.get('score', 1.0)
+                    })
+                
+                total_text = len(search_results.get('retrieved_text', []))
+                total_image = len(search_results.get('retrieved_image', []))
+                total_table = len(search_results.get('retrieved_table', []))
+                
+                self.colored_logger.observation(f"✅ 外部API检索成功，获得 {len(all_results)} 条结果 "
+                                              f"(文本:{total_text}, 图片:{total_image}, 表格:{total_table})")
+            else:
+                self.colored_logger.observation("📭 外部API未返回结果")
+                all_results = []
+            
+            # 质量评估
             quality_score = self._evaluate_section_results_quality(all_results, section_context, query)
+            
+            # 记录成功的查询
+            if self.has_smart_control:
+                self.concurrency_manager.record_api_request(
+                    agent_name='react_agent',
+                    success=True,
+                    response_time=api_response_time
+                )
+            self.react_stats['successful_queries'] += 1
+            
             return all_results, quality_score
+            
         except Exception as e:
+            # 记录失败的查询
+            query_response_time = time.time() - query_start_time
+            if self.has_smart_control:
+                error_type = self._classify_react_error(str(e))
+                self.concurrency_manager.record_api_request(
+                    agent_name='react_agent',
+                    success=False,
+                    response_time=query_response_time,
+                    error_type=error_type
+                )
+            self.react_stats['failed_queries'] += 1
+            
             self.colored_logger.error(f"观察阶段失败: {e}")
             return [], 0.0
+    
+
+
+    def _classify_react_error(self, error_message: str) -> str:
+        """智能错误分类 - ReAct Agent专用"""
+        error_msg = error_message.lower()
+        
+        if 'rate limit' in error_msg or '429' in error_msg:
+            return 'rate_limit'
+        elif 'timeout' in error_msg:
+            return 'timeout'
+        elif 'network' in error_msg or 'connection' in error_msg:
+            return 'network'
+        elif 'rag' in error_msg or 'retrieval' in error_msg:
+            return 'client_error'  # RAG检索错误视为客户端错误
+        elif '5' in error_msg[:2]:  # 5xx errors
+            return 'server_error'
+        elif '4' in error_msg[:2]:  # 4xx errors
+            return 'client_error'
+        else:
+            return 'unknown'
 
     def _evaluate_section_results_quality(self, results: List[Dict], section_context: Dict[str, str], query: str) -> float:
         """评估结果质量"""
@@ -233,8 +385,34 @@ class ReactAgent:
             return False
         return True
 
-    def _synthesize_retrieved_content(self, section_context: Dict[str, str], state: ReActState) -> str:
-        """合成最终内容"""
-        if not state.retrieved_results: return f"未能检索到关于'{section_context['subtitle']}'的相关信息。"
-        unique_contents = {str(r.get('content', str(r)))[:50]: (str(r.get('content', str(r))), r.get('source', '未知')) for r in state.retrieved_results}
-        return "\n---\n".join([f"来源: {s}\n内容: {c[:300]}...\n" for c, s in unique_contents.values()][:5])
+    def _synthesize_retrieved_results(self, section_context: Dict[str, str], state: ReActState) -> Dict[str, List]:
+        """合成最终结果为三个分离的字段"""
+        if not state.retrieved_results:
+            return {
+                'retrieved_text': [],
+                'retrieved_image': [],
+                'retrieved_table': []
+            }
+        
+        # 按类型分组结果
+        retrieved_text = []
+        retrieved_image = []
+        retrieved_table = []
+        
+        for result in state.retrieved_results:
+            result_type = result.get('type', 'text')
+            if result_type == 'text':
+                retrieved_text.append(result)
+            elif result_type == 'image':
+                retrieved_image.append(result)
+            elif result_type == 'table':
+                retrieved_table.append(result)
+            else:
+                # 默认归类为文本
+                retrieved_text.append(result)
+        
+        return {
+            'retrieved_text': retrieved_text,
+            'retrieved_image': retrieved_image,
+            'retrieved_table': retrieved_table
+        }

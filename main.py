@@ -22,6 +22,11 @@ Gauz文档Agent - 智能长文档生成系统
 
 import sys
 import os
+
+# ===== 必须在所有其他导入之前禁用ChromaDB telemetry =====
+os.environ['ANONYMIZED_TELEMETRY'] = 'False'
+os.environ['CHROMA_TELEMETRY_DISABLED'] = 'True'
+
 import json
 import argparse
 import time
@@ -33,10 +38,10 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 try:
     from clients.openrouter_client import OpenRouterClient
-    from clients.simple_rag_client import SimpleRAGClient
-    from Document_Agent.orchestrator_agent.agent import OrchestratorAgent
-    from Document_Agent.section_writer_agent.react_agent import ReactAgent
-    from Document_Agent.content_generator_agent.main_generator import MainDocumentGenerator
+    # 移除SimpleRAGClient导入
+    from Document_Agent.orchestrator_agent import OrchestratorAgent
+    from Document_Agent.section_writer_agent import ReactAgent
+    from Document_Agent.content_generator_agent import MainDocumentGenerator
     from config.settings import setup_logging, get_config, get_concurrency_manager
 except ImportError as e:
     print(f"❌ 导入模块失败: {e}")
@@ -60,14 +65,15 @@ class DocumentGenerationPipeline:
         # 初始化客户端
         try:
             self.llm_client = OpenRouterClient()
-            self.rag_client = SimpleRAGClient()
+            # 移除rag_client，OrchestratorAgent已经集成外部API
             
             # 初始化三个Agent，传入统一的并发管理器
-            self.orchestrator = OrchestratorAgent(self.rag_client, self.llm_client, self.concurrency_manager)
+            # OrchestratorAgent不再需要rag_client参数
+            self.orchestrator = OrchestratorAgent(self.llm_client, self.concurrency_manager)
             self.section_writer = ReactAgent(self.llm_client, self.concurrency_manager)
             self.content_generator = MainDocumentGenerator(self.concurrency_manager)
             
-            print("✅ 系统初始化成功！")
+            print("✅ 系统初始化成功！（使用外部API服务）")
             self._print_concurrency_settings()
             
         except Exception as e:

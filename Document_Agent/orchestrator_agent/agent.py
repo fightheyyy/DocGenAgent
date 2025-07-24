@@ -1,5 +1,5 @@
 """
-编排代理 - 重构版本
+编排代理 - 智能速率控制增强版
 
 功能：
 1. 基于用户查询生成文档结构
@@ -8,7 +8,7 @@
 特点：
 - 两阶段生成模式
 - 支持并发处理
-- 统一的并发管理
+- 集成智能速率控制系统
 """
 
 import json
@@ -25,24 +25,55 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(current_dir))
 sys.path.insert(0, project_root)
 
-from config.settings import get_concurrency_manager, ConcurrencyManager
+from config.settings import get_concurrency_manager, SmartConcurrencyManager
+from clients.external_api_client import get_external_api_client
 
-class OrchestratorAgent:
-    """编排代理 - 支持统一并发管理"""
+class EnhancedOrchestratorAgent:
+    """编排代理 - 集成智能速率控制系统"""
 
-    def __init__(self, rag_agent, llm_client, concurrency_manager: Optional[ConcurrencyManager] = None):
-        self.rag = rag_agent
+    def __init__(self, llm_client, concurrency_manager: Optional[SmartConcurrencyManager] = None):
+        # self.rag = rag_agent  # 已移除，现在使用外部API
         self.llm_client = llm_client
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         
-        # 并发管理器
+        # 外部API客户端
+        self.external_api = get_external_api_client()
+        
+        # 智能并发管理器
         self.concurrency_manager = concurrency_manager or get_concurrency_manager()
         self.max_workers = self.concurrency_manager.get_max_workers('orchestrator_agent')
+        
+        # 智能速率控制器
+        self.rate_limiter = self.concurrency_manager.get_rate_limiter('orchestrator_agent')
+        self.has_smart_control = self.concurrency_manager.has_smart_rate_control('orchestrator_agent')
         
         # 进度追踪
         self.processed_sections = 0
         
-        self.logger.info(f"OrchestratorAgent 初始化完成，并发线程数: {self.max_workers}")
+        # 性能统计
+        self.orchestration_stats = {
+            'total_api_calls': 0,
+            'successful_calls': 0,
+            'failed_calls': 0,
+            'total_processing_time': 0.0,
+            'structure_generation_time': 0.0,
+            'guide_generation_time': 0.0,
+            'template_search_calls': 0,
+            'template_search_success': 0
+        }
+        
+        status_msg = f"智能速率控制: {'已启用' if self.has_smart_control else '传统模式'}"
+        self.logger.info(f"EnhancedOrchestratorAgent 初始化完成，并发线程数: {self.max_workers}, {status_msg}")
+        
+        # 检查外部API服务状态
+        try:
+            api_status = self.external_api.check_service_status()
+            if api_status.get('status') == 'running':
+                self.logger.info(f"✅ 外部API服务连接正常: {api_status.get('service', '')} v{api_status.get('version', '')}")
+            else:
+                self.logger.warning(f"⚠️ 外部API服务状态异常: {api_status}")
+        except Exception as e:
+            self.logger.error(f"❌ 外部API服务连接检查失败: {e}")
 
     def set_max_workers(self, max_workers: int):
         """动态设置最大线程数"""
@@ -56,7 +87,7 @@ class OrchestratorAgent:
 
     def query_existing_template(self, user_description: str) -> Optional[Dict[str, Any]]:
         """
-        查询是否存在现有的文档模板
+        查询是否存在现有的文档模板 - 使用外部API
         
         Args:
             user_description: 用户查询描述
@@ -64,41 +95,182 @@ class OrchestratorAgent:
         Returns:
             Optional[Dict[str, Any]]: 如果找到有效模板则返回模板结构，否则返回None
         """
-        self.logger.info("🔍 开始查询现有文档模板...")
+        self.logger.info("🔍 开始查询现有文档模板 (使用外部API)...")
         
         try:
+            # 智能速率控制
+            if self.has_smart_control:
+                delay = self.rate_limiter.get_delay()
+                if delay > 0:
+                    self.logger.debug(f"智能延迟: {delay:.2f}秒")
+                    time.sleep(delay)
+            
             # 构建模板查询语句
             template_query = f"文档模板 结构 {user_description}"
             
-            # 使用RAG客户端查询
-            rag_results = self.rag.retrieve(template_query, max_results=3)
+            # 记录API调用
+            api_start_time = time.time()
+            self.orchestration_stats['template_search_calls'] += 1
             
-            if not rag_results:
-                self.logger.info("📭 未找到相关模板")
+            # 使用外部API查询模板
+            template_content = self.external_api.template_search(template_query)
+            
+            api_response_time = time.time() - api_start_time
+            
+            if not template_content:
+                self.logger.info("📭 外部API未找到相关模板")
+                if self.has_smart_control:
+                    self.concurrency_manager.record_api_request(
+                        agent_name='orchestrator_agent',
+                        success=False,
+                        response_time=api_response_time,
+                        error_type='no_results'
+                    )
                 return None
             
-            self.logger.info(f"📬 找到 {len(rag_results)} 个相关结果，开始验证是否为有效模板...")
+            # 记录成功的API调用
+            if self.has_smart_control:
+                self.concurrency_manager.record_api_request(
+                    agent_name='orchestrator_agent',
+                    success=True,
+                    response_time=api_response_time
+                )
+            self.orchestration_stats['template_search_success'] += 1
             
-            # 遍历结果，寻找有效的文档结构模板
-            for i, result in enumerate(rag_results):
-                self.logger.info(f"🔍 检查第 {i+1} 个结果...")
-                
-                template = self._extract_template_from_result(result)
-                if template:
-                    # 验证模板结构
-                    try:
-                        self._validate_document_structure(template)
-                        self.logger.info("✅ 找到有效的文档结构模板！")
-                        return template
-                    except ValueError as e:
-                        self.logger.warning(f"⚠️ 模板结构验证失败: {e}")
-                        continue
+            self.logger.info(f"📬 外部API返回模板内容，长度: {len(template_content)} 字符")
             
-            self.logger.info("📭 未找到有效的文档结构模板")
+            # 尝试解析模板内容为文档结构
+            template = self._extract_template_from_api_response(template_content)
+            if template:
+                # 验证模板结构
+                try:
+                    self._validate_document_structure(template)
+                    self.logger.info("✅ 找到有效的文档结构模板！")
+                    return template
+                except ValueError as e:
+                    self.logger.warning(f"⚠️ 模板结构验证失败: {e}")
+                return None
+            
+            self.logger.info("📭 外部API返回的内容不是有效的文档结构模板")
             return None
             
         except Exception as e:
+            # 记录失败的API调用
+            api_response_time = time.time() - api_start_time if 'api_start_time' in locals() else 0
+            if self.has_smart_control:
+                error_type = self._classify_orchestrator_error(str(e))
+                self.concurrency_manager.record_api_request(
+                    agent_name='orchestrator_agent',
+                    success=False,
+                    response_time=api_response_time,
+                    error_type=error_type
+                )
+            
             self.logger.error(f"❌ 查询模板时发生错误: {e}")
+            return None
+
+    def _extract_template_from_api_response(self, template_content: str) -> Optional[Dict[str, Any]]:
+        """
+        从外部API响应中提取文档结构模板
+        
+        Args:
+            template_content: 外部API返回的模板内容
+            
+        Returns:
+            Optional[Dict[str, Any]]: 提取的模板结构，如果无效则返回None
+        """
+        try:
+            self.logger.info(f"正在解析外部API返回的模板内容，长度: {len(template_content)} 字符")
+            
+            # 首先尝试直接解析为JSON
+            if template_content.strip().startswith('{'):
+                try:
+                    template = json.loads(template_content)
+                    if isinstance(template, dict) and 'report_guide' in template:
+                        self.logger.info(f"✅ 成功解析模板（直接JSON），包含 {len(template['report_guide'])} 个部分")
+                        return template
+                except json.JSONDecodeError:
+                    pass
+            
+            # 外部API返回格式可能包含说明文字，需要特殊处理
+            # 查找Python字典格式的内容
+            import re
+            
+            # 方法1: 寻找以{'report_guide'开头的字典
+            dict_pattern = r"(\{'report_guide'.*?\})"
+            match = re.search(dict_pattern, template_content, re.DOTALL)
+            if match:
+                dict_content = match.group(1)
+                try:
+                    # 使用ast.literal_eval来安全解析Python字典格式
+                    import ast
+                    template = ast.literal_eval(dict_content)
+                    if isinstance(template, dict) and 'report_guide' in template:
+                        self.logger.info(f"✅ 成功解析模板（Python字典格式），包含 {len(template['report_guide'])} 个部分")
+                        return template
+                except (ValueError, SyntaxError) as e:
+                    self.logger.warning(f"Python字典解析失败: {e}")
+            
+            # 方法2: 查找完整的字典结构
+            brace_pattern = r"(\{[^{}]*'report_guide'[^{}]*\[[^\[\]]*\{[^{}]*\}[^\[\]]*\][^{}]*\})"
+            match = re.search(brace_pattern, template_content, re.DOTALL)
+            if match:
+                dict_content = match.group(1)
+                try:
+                    import ast
+                    template = ast.literal_eval(dict_content)
+                    if isinstance(template, dict) and 'report_guide' in template:
+                        self.logger.info(f"✅ 成功解析模板（完整字典格式），包含 {len(template['report_guide'])} 个部分")
+                        return template
+                except (ValueError, SyntaxError) as e:
+                    self.logger.warning(f"完整字典解析失败: {e}")
+            
+            # 方法3: 更宽松的字典提取（处理嵌套结构）
+            try:
+                # 寻找第一个{到最后一个}的内容
+                start_idx = template_content.find("{")
+                if start_idx != -1:
+                    # 找到匹配的}
+                    brace_count = 0
+                    end_idx = start_idx
+                    for i in range(start_idx, len(template_content)):
+                        if template_content[i] == '{':
+                            brace_count += 1
+                        elif template_content[i] == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                end_idx = i
+                                break
+                    
+                    if brace_count == 0:
+                        dict_content = template_content[start_idx:end_idx + 1]
+                        import ast
+                        template = ast.literal_eval(dict_content)
+                        if isinstance(template, dict) and 'report_guide' in template:
+                            self.logger.info(f"✅ 成功解析模板（宽松提取），包含 {len(template['report_guide'])} 个部分")
+                            return template
+            except Exception as e:
+                self.logger.warning(f"宽松提取失败: {e}")
+            
+            # 方法4: 尝试使用原有的智能JSON提取
+            try:
+                json_content = self._extract_json_from_response(template_content)
+                template = json.loads(json_content)
+                if 'report_guide' in template:
+                    self.logger.info(f"✅ 成功提取模板（智能提取），包含 {len(template['report_guide'])} 个部分")
+                    return template
+            except (ValueError, json.JSONDecodeError) as e:
+                self.logger.warning(f"智能JSON提取失败: {e}")
+            
+            # 输出更详细的调试信息
+            self.logger.warning(f"所有解析方法都失败，内容前500字符: {template_content[:500]}")
+            self.logger.info("❌ 未能从外部API响应中提取有效的文档模板")
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"解析外部API模板时发生错误: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return None
 
     def _extract_template_from_result(self, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -240,7 +412,7 @@ class OrchestratorAgent:
 
     def generate_document_structure(self, user_description: str, max_retries: int = 3) -> Dict[str, Any]:
         """
-        生成文档基础结构 - 增强版：支持智能重试和响应验证
+        生成文档基础结构 - 智能速率控制增强版
         
         Args:
             user_description: 用户对文档的描述和要求
@@ -253,7 +425,8 @@ class OrchestratorAgent:
             Exception: 当所有重试都失败时抛出异常
         """
         
-        self.logger.info(f"开始生成文档基础结构... (最大重试: {max_retries}次)")
+        self.logger.info(f"开始生成文档基础结构（智能速率控制增强版）... (最大重试: {max_retries}次)")
+        structure_start_time = time.time()
         
         base_prompt = """
 你是一个资深的专业文档结构设计专家。
@@ -312,6 +485,13 @@ class OrchestratorAgent:
         
         for attempt in range(max_retries):
             try:
+                # 智能速率控制
+                if self.has_smart_control:
+                    delay = self.rate_limiter.get_delay()
+                    if delay > 0:
+                        self.logger.debug(f"智能延迟: {delay:.2f}秒")
+                        time.sleep(delay)
+                
                 # 构建prompt，重试时强调格式要求
                 prompt = base_prompt.format(user_description=user_description)
                 if attempt > 0:
@@ -319,8 +499,14 @@ class OrchestratorAgent:
                 
                 self.logger.info(f"🔄 第{attempt + 1}次尝试生成文档结构...")
                 
+                # 记录API调用
+                api_start_time = time.time()
+                self.orchestration_stats['total_api_calls'] += 1
+                
                 # 调用LLM
                 response = self.llm_client.generate(prompt)
+                
+                api_response_time = time.time() - api_start_time
                 
                 # 验证响应不为空
                 if not response or not response.strip():
@@ -335,13 +521,35 @@ class OrchestratorAgent:
                 # 验证结构完整性
                 self._validate_document_structure(structure)
                 
+                # 记录成功
+                self.orchestration_stats['successful_calls'] += 1
+                if self.has_smart_control:
+                    self.concurrency_manager.record_api_request(
+                        agent_name='orchestrator_agent',
+                        success=True,
+                        response_time=api_response_time
+                    )
+                
                 # 成功！
                 sections_count = sum(len(part.get('sections', [])) for part in structure.get('report_guide', []))
+                self.orchestration_stats['structure_generation_time'] = time.time() - structure_start_time
+                
                 self.logger.info(f"✅ 文档基础结构生成成功 (尝试 {attempt + 1}/{max_retries})")
                 self.logger.info(f"📊 生成了 {len(structure.get('report_guide', []))} 个主要部分，{sections_count} 个子章节")
                 return structure
                 
             except (json.JSONDecodeError, ValueError, KeyError) as e:
+                # 记录失败
+                self.orchestration_stats['failed_calls'] += 1
+                if self.has_smart_control:
+                    error_type = self._classify_orchestrator_error(str(e))
+                    self.concurrency_manager.record_api_request(
+                        agent_name='orchestrator_agent',
+                        success=False,
+                        response_time=api_response_time if 'api_response_time' in locals() else 0,
+                        error_type=error_type
+                    )
+                
                 error_msg = f"第{attempt + 1}次尝试失败: {str(e)}"
                 
                 if attempt < max_retries - 1:
@@ -359,6 +567,16 @@ class OrchestratorAgent:
                     raise Exception(f"文档结构生成失败，{max_retries}次重试全部失败: {e}")
             
             except Exception as e:
+                # 记录其他错误
+                self.orchestration_stats['failed_calls'] += 1
+                if self.has_smart_control:
+                    self.concurrency_manager.record_api_request(
+                        agent_name='orchestrator_agent',
+                        success=False,
+                        response_time=api_response_time if 'api_response_time' in locals() else 0,
+                        error_type='unknown'
+                    )
+                
                 # 其他未预期的错误
                 self.logger.error(f"🚨 意外错误 (尝试 {attempt + 1}/{max_retries}): {e}")
                 if attempt == max_retries - 1:
@@ -368,6 +586,25 @@ class OrchestratorAgent:
         
         # 理论上不会到达这里，但为了类型安全
         raise Exception("文档结构生成失败：未知错误")
+    
+    def _classify_orchestrator_error(self, error_message: str) -> str:
+        """智能错误分类 - 编排Agent专用"""
+        error_msg = error_message.lower()
+        
+        if 'rate limit' in error_msg or '429' in error_msg:
+            return 'rate_limit'
+        elif 'timeout' in error_msg:
+            return 'timeout'
+        elif 'json' in error_msg or 'format' in error_msg:
+            return 'client_error'  # JSON格式错误视为客户端错误
+        elif 'network' in error_msg or 'connection' in error_msg:
+            return 'network'
+        elif '5' in error_msg[:2]:  # 5xx errors
+            return 'server_error'
+        elif '4' in error_msg[:2]:  # 4xx errors
+            return 'client_error'
+        else:
+            return 'unknown'
 
     def _extract_json_from_response(self, response: str) -> str:
         """

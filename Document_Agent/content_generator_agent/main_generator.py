@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-简化文档生成器 - 主程序
+简化文档生成器 - 主程序（智能速率控制增强版）
 
 功能：
 - 读取JSON文件（生成文档的依据.json）
-- 支持统一的并发管理
+- 集成高级智能速率控制系统
 - 只生成正文内容（不包含标题）
 - 输出完整版markdown文档（无首行缩进）
+- 实时性能监控和优化建议
 """
 
 import json
@@ -24,13 +25,13 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from .simple_agent import SimpleContentGeneratorAgent
 from clients.openrouter_client import OpenRouterClient
-from config.settings import setup_logging, get_concurrency_manager, ConcurrencyManager
+from config.settings import setup_logging, get_concurrency_manager, SmartConcurrencyManager
 
 
-class MainDocumentGenerator:
-    """主文档生成器 - 支持统一的并发管理"""
+class EnhancedMainDocumentGenerator:
+    """主文档生成器 - 集成智能速率控制系统"""
     
-    def __init__(self, concurrency_manager: ConcurrencyManager = None):
+    def __init__(self, concurrency_manager: SmartConcurrencyManager = None):
         # 设置日志
         setup_logging()
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
@@ -39,16 +40,32 @@ class MainDocumentGenerator:
         self.llm_client = OpenRouterClient()
         self.agent = SimpleContentGeneratorAgent(self.llm_client)
         
-        # 并发管理器
+        # 智能并发管理器
         self.concurrency_manager = concurrency_manager or get_concurrency_manager()
         self.max_workers = self.concurrency_manager.get_max_workers('content_generator_agent')
-        self.rate_limit_delay = self.concurrency_manager.get_rate_limit_delay()
         
-        # 速率控制
+        # 智能速率控制器
+        self.rate_limiter = self.concurrency_manager.get_rate_limiter('content_generator_agent')
+        self.has_smart_control = self.concurrency_manager.has_smart_rate_control('content_generator_agent')
+        
+        # 兼容性：保留传统速率控制作为后备
+        self.rate_limit_delay = self.concurrency_manager.get_rate_limit_delay('content_generator_agent')
         self.last_request_time = 0
         self.request_lock = threading.Lock()
         
-        self.logger.info(f"MainDocumentGenerator 初始化完成，并发线程数: {self.max_workers}, 速率限制: {self.rate_limit_delay}秒")
+        # 性能统计
+        self.generation_stats = {
+            'total_sections': 0,
+            'completed_sections': 0,
+            'failed_sections': 0,
+            'total_generation_time': 0.0,
+            'avg_quality_score': 0.0,
+            'start_time': None,
+            'end_time': None
+        }
+        
+        status_msg = f"智能速率控制: {'已启用' if self.has_smart_control else '传统模式'}"
+        self.logger.info(f"EnhancedMainDocumentGenerator 初始化完成，并发线程数: {self.max_workers}, {status_msg}")
 
     def set_max_workers(self, max_workers: int):
         """动态设置最大线程数"""
@@ -63,16 +80,18 @@ class MainDocumentGenerator:
     def set_rate_limit_delay(self, delay: float):
         """动态设置速率限制延迟"""
         self.rate_limit_delay = delay
-        self.concurrency_manager.set_rate_limit_delay(delay)
+        self.concurrency_manager.set_rate_limit_delay(delay, 'content_generator_agent')
         self.logger.info(f"ContentGeneratorAgent 速率限制已更新为: {delay}秒")
 
     def get_rate_limit_delay(self) -> float:
         """获取当前速率限制延迟"""
+        if self.has_smart_control:
+            return self.rate_limiter.get_delay()
         return self.rate_limit_delay
 
-    def generate_document(self, json_file_path: str = "第二agent的输出_刘氏宗祠_rag.json") -> str:
+    def generate_document(self, json_file_path: str = "第二agent的输出.json") -> str:
         """
-        生成文档
+        生成文档（智能速率控制增强版）
         
         Args:
             json_file_path: JSON文件路径
@@ -81,11 +100,19 @@ class MainDocumentGenerator:
             str: 完整版文档路径
         """
         
-        print("🚀 开始生成文档...")
+        print("🚀 开始生成文档（智能速率控制增强版）...")
         print(f"📁 输入文件: {json_file_path}")
         print(f"🔧 并行线程: {self.max_workers}")
-        print(f"⏱️  速率限制: {self.rate_limit_delay}秒/请求")
+        
+        if self.has_smart_control:
+            print(f"🧠 智能速率控制: 已启用，目标成功率 {self.rate_limiter.agent_config['target_success_rate']:.0%}")
+        else:
+            print(f"⏱️  传统速率限制: {self.rate_limit_delay}秒/请求")
+            
         print("=" * 60)
+        
+        # 初始化统计
+        self.generation_stats['start_time'] = datetime.now()
         
         # 1. 检查文件
         if not os.path.exists(json_file_path):
@@ -95,45 +122,51 @@ class MainDocumentGenerator:
         with open(json_file_path, 'r', encoding='utf-8') as f:
             json_data = json.load(f)
         
-        # 3. 并行生成内容
-        updated_json = self._generate_content_parallel(json_data)
+        # 3. 并行生成内容（智能速率控制版）
+        updated_json = self._generate_content_parallel_smart(json_data)
         
         # 4. 保存JSON和生成markdown
-        return self._save_results(updated_json)
+        result_path = self._save_results(updated_json)
+        
+        # 5. 输出性能报告
+        self._print_performance_report()
+        
+        return result_path
     
-    def _generate_content_parallel(self, json_data: Dict[str, Any]) -> Dict[str, Any]:
-        """并行生成内容"""
+    def _generate_content_parallel_smart(self, json_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        并行生成内容（智能速率控制版）
+        """
         
-        print("⚡ 开始并行生成...")
-        
-        updated_json = json_data.copy()
-        report_guide = updated_json.get('report_guide', [])
-        
-        # 准备任务列表
+        updated_json = json.loads(json.dumps(json_data))
         tasks = []
-        for title_idx, title_section in enumerate(report_guide):
-            sections = title_section.get('sections', [])
-            for section_idx, section in enumerate(sections):
-                task = {
-                    'title_idx': title_idx,
-                    'section_idx': section_idx,
-                    'subtitle': section.get('subtitle', ''),
-                    'how_to_write': section.get('how_to_write', ''),
-                    'retrieved_data': section.get('retrieved_data', ''),
-                    'title': title_section.get('title', '')
-                }
+        
+        # 构建任务列表
+        for title_idx, title_part in enumerate(updated_json.get('report_guide', [])):
+            for section_idx, section in enumerate(title_part.get('sections', [])):
+                if 'subtitle' in section:
+                    task = {
+                        'title_idx': title_idx,
+                        'section_idx': section_idx,
+                        'subtitle': section['subtitle'],
+                        'how_to_write': section.get('how_to_write', ''),
+                        'retrieved_text': section.get('retrieved_text', []),
+                        'retrieved_image': section.get('retrieved_image', []),
+                        'retrieved_table': section.get('retrieved_table', [])
+                    }
                 tasks.append(task)
         
         total_tasks = len(tasks)
         completed_tasks = 0
+        self.generation_stats['total_sections'] = total_tasks
         
-        print(f"📋 总任务数: {total_tasks}")
+        print(f"📊 开始并行处理 {total_tasks} 个任务...")
         
-        # 并行执行
+        # 并行执行（智能速率控制版）
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # 提交所有任务
             future_to_task = {
-                executor.submit(self._generate_single_section, task): task
+                executor.submit(self._generate_single_section_smart, task): task
                 for task in tasks
             }
             
@@ -154,37 +187,114 @@ class MainDocumentGenerator:
                     section['generation_time'] = result['generation_time']
                     
                     completed_tasks += 1
+                    self.generation_stats['completed_sections'] = completed_tasks
                     progress = (completed_tasks / total_tasks) * 100
                     
-                    print(f"✅ [{completed_tasks:2d}/{total_tasks}] {progress:5.1f}% | {task['subtitle'][:20]:<20} | {result['word_count']:4d}字 | 质量:{result['quality_score']:.2f}")
+                    # 获取当前延迟状态
+                    if self.has_smart_control:
+                        current_delay = self.rate_limiter.current_delay
+                        performance_level = self.rate_limiter._assess_performance_level()
+                        status_icon = "🚀" if performance_level == "excellent" else "⚡" if performance_level == "good" else "⚠️"
+                    else:
+                        current_delay = self.rate_limit_delay
+                        status_icon = "🔄"
+                    
+                    print(f"{status_icon} [{completed_tasks:2d}/{total_tasks}] {progress:5.1f}% | {task['subtitle'][:25]:<25} | {result['word_count']:4d}字 | 质量:{result['quality_score']:.2f} | 延迟:{current_delay:.1f}s")
                     
                 except Exception as e:
                     completed_tasks += 1
-                    print(f"❌ [{completed_tasks:2d}/{total_tasks}] 失败 | {task['subtitle'][:20]:<20} | 错误: {e}")
+                    self.generation_stats['failed_sections'] += 1
+                    
+                    # 记录失败到智能速率控制器
+                    if self.has_smart_control:
+                        self.concurrency_manager.record_api_request(
+                            agent_name='content_generator_agent',
+                            success=False,
+                            error_type='unknown'
+                        )
+                    
+                    print(f"❌ [{completed_tasks:2d}/{total_tasks}] 失败 | {task['subtitle'][:25]:<25} | 错误: {e}")
         
         print("🎉 并行生成完成!")
+        self.generation_stats['end_time'] = datetime.now()
         return updated_json
     
-    def _generate_single_section(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        """生成单个章节（带速率限制）"""
+    def _generate_single_section_smart(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """生成单个章节（智能速率控制版）"""
         
-        # 速率限制
-        with self.request_lock:
-            current_time = time.time()
-            time_since_last = current_time - self.last_request_time
-            
-            if time_since_last < self.rate_limit_delay:
-                sleep_time = self.rate_limit_delay - time_since_last
-                time.sleep(sleep_time)
-            
-            self.last_request_time = time.time()
+        start_time = time.time()
         
-        # 生成内容
-        return self.agent.generate_content_from_json(
-            task['subtitle'],
-            task['how_to_write'],
-            task['retrieved_data']
-        )
+        # 智能速率控制
+        if self.has_smart_control:
+            # 使用智能速率控制器获取动态延迟
+            delay = self.rate_limiter.get_delay()
+            if delay > 0:
+                time.sleep(delay)
+        else:
+            # 兼容性：使用传统速率控制
+            with self.request_lock:
+                current_time = time.time()
+                time_since_last = current_time - self.last_request_time
+                
+                if time_since_last < self.rate_limit_delay:
+                    sleep_time = self.rate_limit_delay - time_since_last
+                    time.sleep(sleep_time)
+                
+                self.last_request_time = time.time()
+        
+        # 执行内容生成
+        try:
+            generation_start = time.time()
+            result = self.agent.generate_content_from_json(
+                task['subtitle'],
+                task['how_to_write'],
+                task['retrieved_text'],
+                task['retrieved_image'],
+                task['retrieved_table']
+            )
+            generation_time = time.time() - generation_start
+            
+            # 记录成功到智能速率控制器
+            if self.has_smart_control:
+                self.concurrency_manager.record_api_request(
+                    agent_name='content_generator_agent',
+                    success=True,
+                    response_time=generation_time
+                )
+            
+            return result
+            
+        except Exception as e:
+            generation_time = time.time() - generation_start if 'generation_start' in locals() else 0
+            
+            # 智能错误分类和记录
+            if self.has_smart_control:
+                error_type = self._classify_error(str(e))
+                self.concurrency_manager.record_api_request(
+                    agent_name='content_generator_agent',
+                    success=False,
+                    response_time=generation_time,
+                    error_type=error_type
+                )
+            
+            raise e
+    
+    def _classify_error(self, error_message: str) -> str:
+        """智能错误分类"""
+        error_msg = error_message.lower()
+        
+        if 'rate limit' in error_msg or '429' in error_msg:
+            return 'rate_limit'
+        elif 'timeout' in error_msg:
+            return 'timeout'
+        elif 'network' in error_msg or 'connection' in error_msg:
+            return 'network'
+        elif '5' in error_msg[:2]:  # 5xx errors
+            return 'server_error'
+        elif '4' in error_msg[:2]:  # 4xx errors
+            return 'client_error'
+        else:
+            return 'unknown'
     
     def _save_results(self, updated_json: Dict[str, Any]) -> str:
         """保存结果文件"""
@@ -211,16 +321,72 @@ class MainDocumentGenerator:
         print("📊 生成统计:")
         print(f"   总章节数: {stats['total_sections']}")
         print(f"   完成章节: {stats['completed_sections']}")
+        print(f"   失败章节: {self.generation_stats['failed_sections']}")
         print(f"   总字数: {stats['total_words']:,}")
         print(f"   平均质量分: {stats['average_quality']:.3f}")
         print("=" * 60)
         print("📁 输出文件:")
         print(f"   JSON: {json_path}")
-        print(f"   完整版: {full_md_path}")
+        print(f"   Markdown: {full_md_path}")
         print("=" * 60)
         
         return full_md_path
     
+    def _print_performance_report(self):
+        """打印性能报告"""
+        if not self.has_smart_control:
+            print("ℹ️  智能速率控制未启用，无详细性能报告")
+            return
+        
+        print("\n" + "="*60)
+        print("📈 智能速率控制性能报告")
+        print("="*60)
+        
+        # 获取性能报告
+        report = self.concurrency_manager.get_performance_report('content_generator_agent')
+        
+        if 'error' in report:
+            print(f"⚠️  {report['error']}")
+            return
+        
+        # 基本性能指标
+        print(f"🎯 目标成功率: {report['target_success_rate']:.0%}")
+        print(f"📊 实际成功率: {report['recent_success_rate']:.1%}")
+        print(f"⏱️  当前延迟: {report['current_delay']:.2f}秒")
+        print(f"🔄 自适应因子: {report['adaptive_factor']:.2f}")
+        print(f"📈 性能等级: {report['performance_level']}")
+        print(f"📉 趋势: {report['trend']}")
+        
+        # 错误统计
+        if report['error_breakdown']:
+            print(f"\n🚨 错误分布:")
+            for error_type, count in report['error_breakdown'].items():
+                print(f"   {error_type}: {count}次")
+        
+        # 优化建议
+        print(f"\n💡 优化建议:")
+        for suggestion in report['recommendations']:
+            print(f"   • {suggestion}")
+        
+        print("="*60)
+
+    def get_comprehensive_performance_report(self) -> Dict[str, Any]:
+        """获取综合性能报告"""
+        base_report = {
+            'generation_stats': self.generation_stats.copy(),
+            'system_config': {
+                'max_workers': self.max_workers,
+                'has_smart_control': self.has_smart_control,
+                'rate_limit_delay': self.rate_limit_delay
+            }
+        }
+        
+        if self.has_smart_control:
+            smart_report = self.concurrency_manager.get_performance_report('content_generator_agent')
+            base_report['smart_rate_control'] = smart_report
+        
+        return base_report
+
     def _convert_to_markdown(self, json_data: Dict[str, Any]) -> str:
         """转换为markdown格式"""
         
@@ -301,7 +467,7 @@ def main():
     
     try:
         # 创建生成器
-        generator = MainDocumentGenerator()
+        generator = EnhancedMainDocumentGenerator()
         
         # 生成文档
         full_path = generator.generate_document()

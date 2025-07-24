@@ -1,26 +1,26 @@
 """
-章节写作代理 (ReactAgent)
-
-基于ReAct(Reasoning-Acting-Observing)框架的智能写作Agent
-
-核心特性：
-1. 完整的推理-行动-观察循环
-2. 结果质量评估和反馈机制
-3. 自适应查询优化策略
-4. 从检索失败中学习改进
-5. 支持多种文档类型
-6. 迭代直到获得满意结果
+章节写作代理 (ReactAgent) - 智能速率控制增强版
 
 职责：
-1. 分析章节信息需求并制定检索策略
-2. 执行多轮RAG检索优化
-3. 评估检索结果质量
-4. 基于反馈调整查询方法
-5. 综合高质量信息生成内容
+1. 使用ReAct模式进行智能信息检索
+2. 执行Reasoning-Acting-Observing循环
+3. 收集和整理相关信息和资料
+4. 为内容生成代理提供高质量的信息支持
+5. 集成智能速率控制和RAG查询优化
+
+特点：
+- 多策略查询方式
+- 智能质量评估
+- 并行处理支持
+- 智能速率控制
 """
 
-from .react_agent import ReactAgent
+from .react_agent import EnhancedReactAgent
+
+# 向后兼容性别名
+ReactAgent = EnhancedReactAgent
 
 __all__ = [
-    'ReactAgent',           # 🌟 唯一的ReAct智能Agent
+    'EnhancedReactAgent',
+    'ReactAgent'
 ] 
