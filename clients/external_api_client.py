@@ -42,7 +42,8 @@ class ExternalAPIClient:
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         
         # API服务器配置
-        self.api_base_url = os.getenv("API_BASE_URL", "http://5bd116fe.r12.cpolar.top")
+        self.template_api_url = os.getenv("TEMPLATE_API_URL", "http://28ec64c9.r3.cpolar.cn")
+        self.rag_api_url = os.getenv("RAG_API_URL", "http://localhost:8000")
         self.timeout = int(os.getenv("API_TIMEOUT", "30"))
         self.skip_health_check = os.getenv("SKIP_HEALTH_CHECK", "false").lower() == "true"
         
@@ -58,9 +59,9 @@ class ExternalAPIClient:
         else:
             self._check_service_availability()
         
-        self.logger.info(f"ExternalAPIClient 初始化完成，API服务器: {self.api_base_url}")
-        self.logger.info(f"模板搜索服务: {'可用' if self.template_available else '不可用'}")
-        self.logger.info(f"文档搜索服务: {'可用' if self.document_available else '不可用'}")
+        self.logger.info(f"ExternalAPIClient 初始化完成")
+        self.logger.info(f"模板搜索服务: {self.template_api_url} - {'可用' if self.template_available else '不可用'}")
+        self.logger.info(f"RAG检索服务: {self.rag_api_url} - {'可用' if self.document_available else '不可用'}")
     
     def _check_service_availability(self):
         """检查服务可用性"""
@@ -68,44 +69,29 @@ class ExternalAPIClient:
             # 同步方式检查服务状态
             import requests
             
-            # 优先尝试健康检查端点
+            # 检查模板搜索服务
             try:
-                response = requests.get(f"{self.api_base_url}/health", timeout=5)
-                if response.status_code == 200:
-                    self.template_available = True
-                    self.document_available = True
-                    self.logger.info("✅ API服务健康检查成功")
-                    return
-                else:
-                    self.logger.warning(f"⚠️ 健康检查响应异常: {response.status_code}")
-            except Exception as e:
-                self.logger.warning(f"⚠️ 健康检查失败: {e}")
-            
-            # 如果健康检查失败，尝试直接检查API端点可用性
-            try:
-                # 发送一个简单的OPTIONS请求检查服务器是否响应
-                response = requests.options(f"{self.api_base_url}/template_search", timeout=5)
-                # 只要服务器有响应就认为可用（包括405 Method Not Allowed等）
+                response = requests.options(f"{self.template_api_url}/template_search", timeout=5)
                 if response.status_code in [200, 405, 404]:
                     self.template_available = True
-                    self.logger.info("✅ 模板搜索端点可达")
+                    self.logger.info("✅ 模板搜索服务可达")
             except Exception as e:
-                self.logger.warning(f"⚠️ 模板搜索端点检查失败: {e}")
+                self.logger.warning(f"⚠️ 模板搜索服务检查失败: {e}")
                 # 即使检查失败，也假设服务可用，在实际调用时再处理错误
                 self.template_available = True
                 self.logger.info("🔄 假设模板搜索服务可用，将在调用时验证")
             
+            # 检查RAG检索服务
             try:
-                # 检查文档搜索端点
-                response = requests.options(f"{self.api_base_url}/document_search", timeout=5)
+                response = requests.options(f"{self.rag_api_url}/api/v1/search", timeout=5)
                 if response.status_code in [200, 405, 404]:
                     self.document_available = True
-                    self.logger.info("✅ 文档搜索端点可达")
+                    self.logger.info("✅ RAG检索服务可达")
             except Exception as e:
-                self.logger.warning(f"⚠️ 文档搜索端点检查失败: {e}")
+                self.logger.warning(f"⚠️ RAG检索服务检查失败: {e}")
                 # 即使检查失败，也假设服务可用
                 self.document_available = True
-                self.logger.info("🔄 假设文档搜索服务可用，将在调用时验证")
+                self.logger.info("🔄 假设RAG检索服务可用，将在调用时验证")
                 
         except ImportError:
             self.logger.error("❌ 缺少requests库，无法检查服务状态")
@@ -114,11 +100,12 @@ class ExternalAPIClient:
             self.document_available = True
             self.logger.info("🔄 跳过服务检查，假设服务可用")
     
-    async def _make_api_request(self, endpoint: str, data: dict, max_retries: int = 3) -> Optional[dict]:
+    async def _make_api_request(self, base_url: str, endpoint: str, data: dict, max_retries: int = 3) -> Optional[dict]:
         """
         发送API请求
         
         Args:
+            base_url: API基础URL
             endpoint: API端点
             data: 请求数据
             max_retries: 最大重试次数
@@ -126,7 +113,7 @@ class ExternalAPIClient:
         Returns:
             Optional[dict]: API响应，失败时返回None
         """
-        url = f"{self.api_base_url}{endpoint}"
+        url = f"{base_url}{endpoint}"
         
         for attempt in range(max_retries):
             try:
@@ -162,15 +149,16 @@ class ExternalAPIClient:
             "service": "外部API客户端",
             "status": "running" if (self.template_available or self.document_available) else "degraded",
             "version": "3.0.0-api",
-            "api_base_url": self.api_base_url,
+            "template_api_url": self.template_api_url,
+            "rag_api_url": self.rag_api_url,
             "tools": {
                 "template_search": {
                     "available": self.template_available,
                     "endpoint": "/template_search"
                 },
-                "document_search": {
+                "rag_search": {
                     "available": self.document_available,
-                    "endpoint": "/document_search"
+                    "endpoint": "/api/v1/search"
                 }
             },
             "mode": "api_client"
@@ -204,7 +192,7 @@ class ExternalAPIClient:
             request_data = {"query": query}
             
             # 调用API
-            response = await self._make_api_request("/template_search", request_data, max_retries)
+            response = await self._make_api_request(self.template_api_url, "/template_search", request_data, max_retries)
             
             if response is None:
                 self.logger.error("❌ 模板搜索API调用失败")
@@ -226,20 +214,20 @@ class ExternalAPIClient:
                        top_k: int = 5, content_type: str = "all", 
                        max_retries: int = 3) -> Optional[Dict[str, List]]:
         """
-        文档搜索
+        RAG检索搜索
         
         Args:
             query_text: 搜索查询
             project_name: 项目名称
             top_k: 返回结果数量
-            content_type: 内容类型
+            content_type: 内容类型（兼容参数，实际使用hybrid搜索）
             max_retries: 最大重试次数
             
         Returns:
-            Optional[Dict[str, List]]: 搜索结果，失败时返回None
+            Optional[Dict[str, List]]: 搜索结果，包含retrieved_text、retrieved_image等，失败时返回None
         """
         if not self.document_available:
-            self.logger.error("❌ 文档搜索服务不可用")
+            self.logger.error("❌ RAG检索服务不可用")
             return None
         
         # 使用同步方式调用异步函数
@@ -248,45 +236,78 @@ class ExternalAPIClient:
     async def _document_search_async(self, query_text: str, project_name: str = "医灵古庙", 
                                    top_k: int = 5, content_type: str = "all", 
                                    max_retries: int = 3) -> Optional[Dict[str, List]]:
-        """异步文档搜索"""
+        """异步RAG检索搜索"""
         try:
-            self.logger.info(f"📄 API文档搜索: {query_text} (项目: {project_name}, top_k: {top_k})")
+            self.logger.info(f"📄 RAG检索搜索: {query_text} (项目: {project_name}, top_k: {top_k})")
             start_time = time.time()
             
-            # 构造请求数据
+            # 构造请求数据 - 使用新的API格式
             request_data = {
-                "query_text": query_text,
+                "query": query_text,
                 "project_name": project_name,
-                "top_k": top_k,
-                "content_type": content_type
+                "search_type": "hybrid",  # 使用混合搜索
+                "top_k": top_k
             }
             
-            # 调用API
-            response = await self._make_api_request("/document_search", request_data, max_retries)
+            # 调用RAG检索API
+            response = await self._make_api_request(self.rag_api_url, "/api/v1/search", request_data, max_retries)
             
             if response is None:
-                self.logger.error("❌ 文档搜索API调用失败")
+                self.logger.error("❌ RAG检索API调用失败")
+                return None
+            
+            # 检查响应状态
+            if response.get("status") != "success":
+                error_msg = response.get("message", "搜索失败")
+                self.logger.error(f"❌ RAG检索失败: {error_msg}")
                 return None
             
             # 提取搜索结果
-            retrieved_text = response.get('retrieved_text', [])
-            retrieved_image = response.get('retrieved_image', [])
-            retrieved_table = response.get('retrieved_table', [])
+            data = response.get('data', {})
+            retrieved_text = data.get('retrieved_text', '')
+            retrieved_images = data.get('retrieved_images', [])
+            metadata = data.get('metadata', {})
             
             response_time = time.time() - start_time
-            total_results = len(retrieved_text) + len(retrieved_image) + len(retrieved_table)
             
-            self.logger.info(f"✅ 文档搜索成功: 耗时 {response_time:.2f}s, 结果 {total_results} 条 "
-                           f"(文本:{len(retrieved_text)}, 图片:{len(retrieved_image)}, 表格:{len(retrieved_table)})")
+            # 统计结果
+            text_length = len(retrieved_text) if retrieved_text else 0
+            image_count = len(retrieved_images)
+            
+            self.logger.info(f"✅ RAG检索成功: 耗时 {response_time:.2f}s, "
+                           f"文本长度: {text_length} 字符, 图片: {image_count} 张")
+            
+            # 返回兼容格式，保持与Agent期望的接口一致
+            # 处理文本结果 - 转换为Agent期望的字典格式
+            formatted_texts = []
+            if retrieved_text:
+                formatted_texts.append({
+                    'content': retrieved_text,
+                    'source': 'RAG检索服务',
+                    'type': 'text',
+                    'score': 1.0
+                })
+            
+            # 处理图片结果 - 转换为Agent期望的字典格式
+            formatted_images = []
+            for i, image_url in enumerate(retrieved_images):
+                formatted_images.append({
+                    'description': f'检索到的相关图片 {i+1}',
+                    'source': 'RAG检索服务',
+                    'type': 'image',
+                    'path': image_url,
+                    'score': metadata.get('scores', [1.0])[i] if i < len(metadata.get('scores', [])) else 1.0
+                })
             
             return {
-                'retrieved_text': retrieved_text,
-                'retrieved_image': retrieved_image,
-                'retrieved_table': retrieved_table
+                'retrieved_text': formatted_texts,
+                'retrieved_image': formatted_images,
+                'retrieved_table': [],  # 新API没有table，保持空列表
+                'metadata': metadata
             }
             
         except Exception as e:
-            self.logger.error(f"❌ 文档搜索失败: {e}")
+            self.logger.error(f"❌ RAG检索失败: {e}")
             return None
     
     def get_service_stats(self) -> Dict[str, Any]:
@@ -295,9 +316,10 @@ class ExternalAPIClient:
             "active_requests": 0,  # API调用无本地并发统计
             "total_requests": 0,
             "available_template_tools": 1 if self.template_available else 0,
-            "available_document_tools": 1 if self.document_available else 0,
+            "available_rag_tools": 1 if self.document_available else 0,
             "mode": "api_client",
-            "api_base_url": self.api_base_url
+            "template_api_url": self.template_api_url,
+            "rag_api_url": self.rag_api_url
         }
     
     def close(self):

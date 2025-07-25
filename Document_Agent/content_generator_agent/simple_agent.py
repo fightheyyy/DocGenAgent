@@ -329,21 +329,38 @@ class SimpleContentGeneratorAgent:
         """
         final_content = content
         
-        # 添加表格
+        # 添加表格 - 使用三级标题
         if retrieved_table:
-            final_content += "\n\n" + "=" * 50 + "\n相关表格资料\n" + "=" * 50
+            final_content += "\n\n### 相关表格资料\n"
             for i, table_item in enumerate(retrieved_table, 1):
                 table_content = table_item.get('content', str(table_item))
                 table_source = table_item.get('source', '未知来源')
-                final_content += f"\n\n【表格{i}】来源: {table_source}\n{table_content}"
+                final_content += f"\n**表格{i}** (来源: {table_source})\n\n{table_content}\n"
         
-        # 添加图片
+        # 添加图片 - 使用三级标题和markdown图片语法，并去重
         if retrieved_image:
-            final_content += "\n\n" + "=" * 50 + "\n相关图片资料\n" + "=" * 50
-            for i, image_item in enumerate(retrieved_image, 1):
-                image_desc = image_item.get('content', image_item.get('description', '无描述'))
+            final_content += "\n\n### 相关图片资料\n"
+            
+            # 根据URL去重图片
+            seen_urls = set()
+            unique_images = []
+            for image_item in retrieved_image:
+                image_path = image_item.get('path', '无路径')
+                if image_path and image_path != '无路径' and image_path not in seen_urls:
+                    seen_urls.add(image_path)
+                    unique_images.append(image_item)
+                elif image_path == '无路径':  # 保留没有路径的图片项
+                    unique_images.append(image_item)
+            
+            for i, image_item in enumerate(unique_images, 1):
+                image_desc = image_item.get('content', image_item.get('description', f'检索到的相关图片 {i}'))
                 image_path = image_item.get('path', '无路径')
                 image_source = image_item.get('source', '未知来源')
-                final_content += f"\n\n【图片{i}】来源: {image_source}\n描述: {image_desc}\n路径: {image_path}"
+                
+                # 使用标准markdown图片语法
+                if image_path and image_path != '无路径':
+                    final_content += f"\n![{image_desc}]({image_path})\n*图片来源: {image_source}*\n"
+                else:
+                    final_content += f"\n**图片{i}** (来源: {image_source})  \n描述: {image_desc}  \n*路径未提供*\n"
         
         return final_content
