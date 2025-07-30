@@ -128,10 +128,11 @@ class EnhancedReactAgent:
         """获取当前最大线程数"""
         return self.max_workers
 
-    def process_report_guide(self, report_guide_data: Dict[str, Any]) -> Dict[str, Any]:
+    def process_report_guide(self, report_guide_data: Dict[str, Any], project_name: str = "医灵古庙") -> Dict[str, Any]:
         """处理完整的报告指南 - 主入口 (并行处理)"""
-        self.colored_logger.logger.info(f"🤖 ReAct开始并行处理报告指南... (线程数: {self.max_workers})")
+        self.colored_logger.logger.info(f"🤖 ReAct开始并行处理报告指南... (项目: {project_name}, 线程数: {self.max_workers})")
         result_data = json.loads(json.dumps(report_guide_data))
+        self.current_project_name = project_name  # 存储项目名称供后续使用
         
         tasks = []
         for part in result_data.get('report_guide', []):
@@ -257,7 +258,7 @@ class EnhancedReactAgent:
             
             search_results = self.external_api.document_search(
                 query_text=combined_query,
-                project_name="医灵古庙",
+                project_name=getattr(self, 'current_project_name', '医灵古庙'),
                 top_k=5,
                 content_type="all"
             )

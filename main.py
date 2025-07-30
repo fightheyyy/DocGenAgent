@@ -123,12 +123,13 @@ class DocumentGenerationPipeline:
             'rate_delay': self.content_generator.get_rate_limit_delay()
         }
     
-    def generate_document(self, user_query: str, output_dir: str = "outputs") -> Dict[str, str]:
+    def generate_document(self, user_query: str, project_name: str, output_dir: str = "outputs") -> Dict[str, str]:
         """
         完整文档生成流程
         
         Args:
             user_query: 用户需求描述
+            project_name: 项目名称，用于RAG检索
             output_dir: 输出目录
             
         Returns:
@@ -142,6 +143,7 @@ class DocumentGenerationPipeline:
         print("🚀 开始文档生成流程...")
         print("=" * 80)
         print(f"📝 用户需求：{user_query}")
+        print(f"🏷️ 项目名称：{project_name}")
         print("=" * 80)
         
         try:
@@ -167,7 +169,7 @@ class DocumentGenerationPipeline:
             print("\n🔍 阶段2：为各章节智能检索相关资料...")
             step2_start = time.time()
             
-            enriched_guide = self.section_writer.process_report_guide(document_guide)
+            enriched_guide = self.section_writer.process_report_guide(document_guide, project_name)
             
             step2_time = time.time() - step2_start
             print(f"✅ 资料检索完成！")

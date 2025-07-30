@@ -8,4 +8,7 @@ uvicorn[standard]>=0.24.0
 pydantic>=2.0.0
 
 # 环境变量管理
-python-dotenv>=1.0.0 
+python-dotenv>=1.0.0
+
+# MinIO对象存储客户端
+minio>=7.2.0 

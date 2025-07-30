@@ -42,8 +42,8 @@ class ExternalAPIClient:
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         
         # API服务器配置
-        self.template_api_url = os.getenv("TEMPLATE_API_URL", "http://28ec64c9.r3.cpolar.cn")
-        self.rag_api_url = os.getenv("RAG_API_URL", "http://localhost:8000")
+        self.template_api_url = os.getenv("TEMPLATE_API_URL", "http://43.139.19.144:8003")
+        self.rag_api_url = os.getenv("RAG_API_URL", "http://43.139.19.144:8001")
         self.timeout = int(os.getenv("API_TIMEOUT", "30"))
         self.skip_health_check = os.getenv("SKIP_HEALTH_CHECK", "false").lower() == "true"
         
